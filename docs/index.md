@@ -76,8 +76,9 @@ claude-manager/
 - **Responsabilidades**:
   - Configuração de servidores MCP
   - Habilitar/desabilitar servidores
-  - Edição de configurações
+  - Edição de configurações JSON
   - Integração com projetos
+  - Expansão de capacidades do Claude Code
 - **📖 Documentação**: [MCP Servers](mcp-servers.md)
 
 ### 📚 **7. Gerenciamento de Histórico**
