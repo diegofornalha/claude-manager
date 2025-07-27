@@ -98,7 +98,7 @@ class ClaudeProjectManagerUI:
         console.clear()
         welcome_text = """
 [bold cyan]Claude Code Project Manager[/bold cyan]
-[dim]Manage your Claude Code projects and configurations[/dim]
+[dim]Gerencie seus projetos de código Claude e configurações[/dim]
         """
         panel = Panel(welcome_text, box=box.DOUBLE, expand=False)
         console.print(panel)

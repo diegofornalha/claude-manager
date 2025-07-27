@@ -62,7 +62,7 @@ from pathlib import Path
 )
 @click.version_option(version=__version__, prog_name="claude-manager")
 def main(config_path: str | None, no_backup: bool, debug: bool, reset_terminal: bool) -> None:
-    """Claude Manager - Manage your Claude Code projects and configurations.
+    """Claude Manager - Gerencie seus projetos de código Claude e configurações.
     
     This tool provides a terminal UI for managing Claude Code projects stored
     in the .claude.json configuration file. It supports:
@@ -485,7 +485,7 @@ def test_help_option(self, runner: CliRunner) -> None:
     result = runner.invoke(main, ["--help"])
     assert result.exit_code == 0
     assert "Claude Manager" in result.output
-    assert "Manage your Claude Code projects" in result.output
+    assert "Gerencie seus projetos de código Claude" in result.output
     assert "--config" in result.output
     assert "--debug" in result.output
 

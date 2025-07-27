@@ -1278,7 +1278,7 @@ class ClaudeManagerApp(App[None]):
     def on_mount(self) -> None:
         """Set up the app."""
         self.title = "Claude Manager"
-        self.sub_title = "Manage your Claude Code projects"
+        self.sub_title = "Gerencie seus projetos de código Claude"
         self.push_screen(ProjectListScreen(self.config_manager))
         
     def on_unmount(self) -> None:

@@ -57,7 +57,7 @@ def setup_logging(debug: bool = False) -> None:
 )
 @click.version_option(version=__version__, prog_name="claude-manager")
 def main(config_path: str | None, no_backup: bool, debug: bool, reset_terminal: bool) -> None:  # noqa: ARG001
-    """Claude Manager - Manage your Claude Code projects and configurations.
+    """Claude Manager - Gerencie seus projetos de código Claude e configurações.
 
     This tool provides a terminal UI for managing Claude Code projects stored
     in the .claude.json configuration file. It supports:
