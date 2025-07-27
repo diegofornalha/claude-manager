@@ -89,3 +89,37 @@ class Project:
             dont_crawl_directory=data.get("dontCrawlDirectory", False),
             mcp_context_uris=data.get("mcpContextUris", []),
         )
+
+
+@dataclass
+class Agent:
+    """Represents a Claude Code agent."""
+    
+    name: str
+    description: str
+    tools: list[str] = field(default_factory=list)
+    file_path: str = ""
+    color: str | None = None
+    priority: str | None = None
+    neural_patterns: list[str] = field(default_factory=list)
+    learning_enabled: bool = False
+    collective_memory: bool = False
+    hive_mind_role: str | None = None
+    concurrent_execution: bool = False
+    sparc_integration: bool = False
+    agent_type: str = "project"  # "global" or "project"
+    
+    @property
+    def tools_display(self) -> str:
+        """Get a display string of tools."""
+        if not self.tools:
+            return "Nenhuma ferramenta"
+        elif len(self.tools) <= 3:
+            return ", ".join(self.tools)
+        else:
+            return f"{', '.join(self.tools[:3])}... (+{len(self.tools) - 3})"
+    
+    @property
+    def is_advanced(self) -> bool:
+        """Check if this is an advanced agent with neural patterns."""
+        return bool(self.neural_patterns or self.learning_enabled or self.hive_mind_role)

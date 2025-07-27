@@ -26,7 +26,7 @@ from textual.widgets import (
 
 if TYPE_CHECKING:
     from claude_manager.config import ClaudeConfigManager
-    from claude_manager.models import Project
+    from claude_manager.models import Agent, Project
 
 from claude_manager.terminal_utils import immediate_terminal_reset
 
@@ -35,15 +35,16 @@ class ProjectListScreen(Screen[None]):
     """Main screen showing project list."""
 
     BINDINGS = [
-        Binding("q", "quit", "Quit"),
-        Binding("escape", "quit", "Quit"),
-        Binding("a", "analyze", "Analyze Projects"),
-        Binding("d", "delete", "Delete Project"),
-        Binding("h", "clear_history", "Clear History"),
-        Binding("m", "manage_mcp", "MCP Servers"),
+        Binding("q", "quit", "Sair"),
+        Binding("escape", "quit", "Sair"),
+        Binding("a", "analyze", "Analisar Projetos"),
+        Binding("d", "delete", "Excluir Projeto"),
+        Binding("h", "clear_history", "Limpar Histórico"),
+        Binding("m", "manage_mcp", "Servidores MCP"),
+        Binding("g", "manage_agents", "Agentes"),
         Binding("b", "manage_backups", "Backups"),
-        Binding("r", "refresh", "Refresh"),
-        Binding("enter", "view_details", "View Details", show=False),
+        Binding("r", "refresh", "Atualizar"),
+        Binding("enter", "view_details", "Ver Detalhes", show=False),
     ]
 
     def __init__(self, config_manager: ClaudeConfigManager) -> None:
@@ -60,7 +61,7 @@ class ProjectListScreen(Screen[None]):
     def on_mount(self) -> None:
         """Set up the table when screen mounts."""
         table = self.query_one("#projects_table", DataTable)
-        table.add_columns("Path", "History", "MCP", "Exists", "Size")
+        table.add_columns("Caminho", "Histórico", "MCP", "Existe", "Tamanho")
         table.zebra_stripes = True
         table.cursor_type = "row"
         self.refresh_projects()
@@ -111,9 +112,9 @@ class ProjectListScreen(Screen[None]):
                 row_key = rows[table.cursor_row]
                 project_path = row_key.value  # Get the actual string value
                 if project_path in self.projects:
-                    self.app.push_screen(
-                        ProjectDetailScreen(self.projects[project_path], project_path)
-                    )
+                    detail_screen = ProjectDetailScreen(self.projects[project_path], project_path)
+                    detail_screen.config_manager = self.config_manager
+                    self.app.push_screen(detail_screen)
 
     def action_delete(self) -> None:
         """Delete selected project."""
@@ -126,7 +127,7 @@ class ProjectListScreen(Screen[None]):
                 if project_path in self.projects:
                     self.app.push_screen(
                         ConfirmScreen(
-                            f"Delete project?\n\n{project_path}",
+                            f"Excluir projeto?\n\n{project_path}",
                             lambda: self._do_delete(project_path),
                         )
                     )
@@ -136,12 +137,12 @@ class ProjectListScreen(Screen[None]):
         self.config_manager.create_backup()
         if self.config_manager.remove_project(project_path):
             if self.config_manager.save_config(create_backup=False):
-                self.notify("Project deleted", severity="information")
+                self.notify("Projeto excluído", severity="information")
                 self.refresh_projects()
             else:
-                self.notify("Failed to save changes", severity="error")
+                self.notify("Falha ao salvar alterações", severity="error")
         else:
-            self.notify("Failed to delete project", severity="error")
+            self.notify("Falha ao excluir projeto", severity="error")
 
     def action_clear_history(self) -> None:
         """Clear history of selected project."""
@@ -158,7 +159,7 @@ class ProjectListScreen(Screen[None]):
                             HistoryManagementScreen(self.config_manager, project, project_path)
                         )
                     else:
-                        self.notify("No history to clear", severity="warning")
+                        self.notify("Sem histórico para limpar", severity="warning")
 
     def _do_clear_history(self, project_path: str) -> None:
         """Actually clear the history."""
@@ -168,10 +169,10 @@ class ProjectListScreen(Screen[None]):
         self.config_manager.update_project(project)
 
         if self.config_manager.save_config(create_backup=False):
-            self.notify("History cleared", severity="information")
+            self.notify("Histórico limpo", severity="information")
             self.refresh_projects()
         else:
-            self.notify("Failed to save changes", severity="error")
+            self.notify("Falha ao salvar alterações", severity="error")
 
     def action_manage_mcp(self) -> None:
         """Manage MCP servers for selected project."""
@@ -195,28 +196,35 @@ class ProjectListScreen(Screen[None]):
     def action_manage_backups(self) -> None:
         """Manage configuration backups."""
         self.app.push_screen(BackupManagementScreen(self.config_manager))
+    
+    def action_manage_agents(self) -> None:
+        """Manage agents."""
+        self.app.push_screen(AgentListScreen(self.config_manager))
 
 
 class ProjectDetailScreen(Screen[None]):
     """Screen showing project details."""
 
     BINDINGS = [
-        Binding("escape", "go_back", "Back"),
-        Binding("q", "go_back", "Back"),
+        Binding("escape", "go_back", "Voltar"),
+        Binding("q", "go_back", "Voltar"),
     ]
 
     def __init__(self, project: Project, project_path: str) -> None:
         super().__init__()
         self.project = project
         self.project_path = project_path
+        self.config_manager: ClaudeConfigManager | None = None
 
     def compose(self) -> ComposeResult:
         """Create the detail view."""
         yield Header()
         yield VerticalScroll(
-            Static(f"[bold]Project: {self.project_path}[/bold]", id="project_title"),
+            Static(f"[bold]Projeto: {self.project_path}[/bold]", id="project_title"),
             Static(id="project_info"),
-            Static("[bold]Recent History:[/bold]", id="history_title"),
+            Static("[bold]Agentes do Projeto:[/bold]", id="agents_title_detail"),
+            Static(id="agents_list"),
+            Static("[bold]Histórico Recente:[/bold]", id="history_title"),
             Static(id="history_list"),
             id="detail_container",
         )
@@ -226,12 +234,30 @@ class ProjectDetailScreen(Screen[None]):
         """Populate the details."""
         info = self.query_one("#project_info", Static)
         info.update(
-            f"Directory exists: {'✓' if self.project.directory_exists else '✗'}\n"
-            f"History entries: {self.project.history_count}\n"
-            f"MCP servers: {len(self.project.mcp_servers)}\n"
-            f"Trust accepted: {'✓' if self.project.has_trust_dialog_accepted else '✗'}\n"
-            f"Size: {self.project.get_size_estimate() / 1024:.1f}KB"
+            f"Diretório existe: {'✓' if self.project.directory_exists else '✗'}\n"
+            f"Entradas do histórico: {self.project.history_count}\n"
+            f"Servidores MCP: {len(self.project.mcp_servers)}\n"
+            f"Confiança aceita: {'✓' if self.project.has_trust_dialog_accepted else '✗'}\n"
+            f"Tamanho: {self.project.get_size_estimate() / 1024:.1f}KB"
         )
+        
+        # Show project agents
+        agents_list = self.query_one("#agents_list", Static)
+        if self.config_manager:
+            agents = self.config_manager.get_agents(self.project_path)
+            # Filter only project-specific agents
+            project_agents = {name: agent for name, agent in agents.items() if agent.agent_type == "project"}
+            
+            if project_agents:
+                agents_text = ""
+                for name, agent in sorted(project_agents.items()):
+                    tools_preview = agent.tools_display
+                    agents_text += f"• {name} - {tools_preview}\n"
+                agents_list.update(agents_text.rstrip())
+            else:
+                agents_list.update("[dim]Nenhum agente específico do projeto[/dim]")
+        else:
+            agents_list.update("[dim]Informação de agentes não disponível[/dim]")
 
         history = self.query_one("#history_list", Static)
         if self.project.history:
@@ -245,7 +271,7 @@ class ProjectDetailScreen(Screen[None]):
                 history_text += f"• {display}\n"
             history.update(history_text)
         else:
-            history.update("[dim]No history[/dim]")
+            history.update("[dim]Sem histórico[/dim]")
 
     def action_go_back(self) -> None:
         """Go back to project list."""
@@ -265,8 +291,8 @@ class ConfirmScreen(Screen[None]):
         yield Container(
             Static(self.message, id="confirm_message"),
             Horizontal(
-                Button("Yes", variant="error", id="yes"),
-                Button("No", variant="primary", id="no"),
+                Button("Sim", variant="error", id="yes"),
+                Button("Não", variant="primary", id="no"),
                 id="button_container",
             ),
             id="confirm_container",
@@ -283,11 +309,11 @@ class MCPServerScreen(Screen[None]):
     """Screen for managing MCP servers for a project."""
 
     BINDINGS = [
-        Binding("escape", "go_back", "Back"),
-        Binding("a", "add_server", "Add Server"),
-        Binding("d", "delete_server", "Delete Server"),
-        Binding("e", "edit_server", "Edit Server"),
-        Binding("t", "toggle_all", "Toggle All"),
+        Binding("escape", "go_back", "Voltar"),
+        Binding("a", "add_server", "Adicionar Servidor"),
+        Binding("d", "delete_server", "Excluir Servidor"),
+        Binding("e", "edit_server", "Editar Servidor"),
+        Binding("t", "toggle_all", "Alternar Todos"),
     ]
 
     def __init__(
@@ -302,9 +328,9 @@ class MCPServerScreen(Screen[None]):
         """Create the MCP server management UI."""
         yield Header()
         yield Container(
-            Static(f"[bold]MCP Servers for: {self.project_path}[/bold]", id="mcp_title"),
+            Static(f"[bold]Servidores MCP para: {self.project_path}[/bold]", id="mcp_title"),
             Static(
-                f"Enable all servers: {'✓' if self.project.enable_all_project_mcp_servers else '✗'}",
+                f"Habilitar todos os servidores: {'✓' if self.project.enable_all_project_mcp_servers else '✗'}",
                 id="enable_all_status",
             ),
             DataTable(id="mcp_table"),
@@ -315,7 +341,7 @@ class MCPServerScreen(Screen[None]):
     def on_mount(self) -> None:
         """Set up the MCP servers table."""
         table = self.query_one("#mcp_table", DataTable)
-        table.add_columns("Server Name", "Configuration")
+        table.add_columns("Nome do Servidor", "Configuração")
         table.zebra_stripes = True
         table.cursor_type = "row"
         self.refresh_servers()
@@ -350,10 +376,10 @@ class MCPServerScreen(Screen[None]):
         self.config_manager.update_project(self.project)
 
         if self.config_manager.save_config():
-            self.notify("Updated enable all servers setting", severity="information")
+            self.notify("Configuração de todos os servidores atualizada", severity="information")
             self.refresh_servers()
         else:
-            self.notify("Failed to save changes", severity="error")
+            self.notify("Falha ao salvar alterações", severity="error")
 
     def action_add_server(self) -> None:
         """Add a new MCP server."""
@@ -393,7 +419,7 @@ class MCPServerScreen(Screen[None]):
                 self.notify(f"Deleted server '{server_name}'", severity="information")
                 self.refresh_servers()
             else:
-                self.notify("Failed to save changes", severity="error")
+                self.notify("Falha ao salvar alterações", severity="error")
 
     def save_server(self, original_name: str | None, new_name: str, config: dict[str, Any]) -> None:
         """Save a server configuration."""
@@ -412,7 +438,7 @@ class MCPServerScreen(Screen[None]):
             self.notify(f"Saved server '{new_name}'", severity="information")
             self.refresh_servers()
         else:
-            self.notify("Failed to save changes", severity="error")
+            self.notify("Falha ao salvar alterações", severity="error")
 
 
 class MCPServerEditScreen(Screen[None]):
@@ -440,23 +466,23 @@ class MCPServerEditScreen(Screen[None]):
         yield Container(
             Static(
                 (
-                    "[bold]Edit MCP Server[/bold]"
+                    "[bold]Editar Servidor MCP[/bold]"
                     if self.original_name
-                    else "[bold]Add MCP Server[/bold]"
+                    else "[bold]Adicionar Servidor MCP[/bold]"
                 ),
                 id="edit_title",
             ),
-            Label("Server Name:"),
+            Label("Nome do Servidor:"),
             Input(
-                value=self.original_name or "", placeholder="Enter server name", id="server_name"
+                value=self.original_name or "", placeholder="Digite o nome do servidor", id="server_name"
             ),
-            Label("Configuration (JSON):"),
+            Label("Configuração (JSON):"),
             TextArea(
                 json.dumps(self.server_config, indent=2) if self.server_config else "{}",
                 id="server_config",
                 language="json",
             ),
-            Static("[dim]Press Ctrl+S to save, Escape to cancel[/dim]", id="edit_help"),
+            Static("[dim]Pressione Ctrl+S para salvar, Escape para cancelar[/dim]", id="edit_help"),
             id="edit_container",
         )
         yield Footer()
@@ -472,7 +498,7 @@ class MCPServerEditScreen(Screen[None]):
 
         server_name = name_input.value.strip()
         if not server_name:
-            self.notify("Server name cannot be empty", severity="error")
+            self.notify("Nome do servidor não pode estar vazio", severity="error")
             return
 
         try:
@@ -494,8 +520,8 @@ class AnalyzeProjectsScreen(Screen[None]):
     """Screen for analyzing projects and showing issues."""
 
     BINDINGS = [
-        Binding("escape", "go_back", "Back"),
-        Binding("q", "go_back", "Back"),
+        Binding("escape", "go_back", "Voltar"),
+        Binding("q", "go_back", "Voltar"),
     ]
 
     def __init__(self, config_manager: ClaudeConfigManager) -> None:
@@ -506,7 +532,7 @@ class AnalyzeProjectsScreen(Screen[None]):
         """Create the analysis view."""
         yield Header()
         yield VerticalScroll(
-            Static("[bold]Project Analysis[/bold]", id="analysis_title"),
+            Static("[bold]Análise de Projetos[/bold]", id="analysis_title"),
             Static(id="analysis_content"),
             id="analysis_container",
         )
@@ -536,43 +562,43 @@ class AnalyzeProjectsScreen(Screen[None]):
         report = []
 
         if non_existent:
-            report.append(f"[bold red]Non-existent directories ({len(non_existent)}):[/bold red]")
+            report.append(f"[bold red]Diretórios inexistentes ({len(non_existent)}):[/bold red]")
             for path in non_existent[:10]:
                 report.append(f"  • {path}")
             if len(non_existent) > 10:
-                report.append(f"  ... and {len(non_existent) - 10} more")
+                report.append(f"  ... e mais {len(non_existent) - 10}")
             report.append("")
 
         if unused:
             report.append(
-                f"[bold yellow]Unused projects (no history) ({len(unused)}):[/bold yellow]"
+                f"[bold yellow]Projetos não utilizados (sem histórico) ({len(unused)}):[/bold yellow]"
             )
             for path in unused[:10]:
                 report.append(f"  • {path}")
             if len(unused) > 10:
-                report.append(f"  ... and {len(unused) - 10} more")
+                report.append(f"  ... e mais {len(unused) - 10}")
             report.append("")
 
         if large_history:
-            report.append(f"[bold blue]Large history projects ({len(large_history)}):[/bold blue]")
+            report.append(f"[bold blue]Projetos com histórico grande ({len(large_history)}):[/bold blue]")
             for path, count in sorted(large_history, key=lambda x: x[1], reverse=True)[:10]:
-                report.append(f"  • {path} ({count} entries)")
+                report.append(f"  • {path} ({count} entradas)")
             if len(large_history) > 10:
-                report.append(f"  ... and {len(large_history) - 10} more")
+                report.append(f"  ... e mais {len(large_history) - 10}")
             report.append("")
 
         if no_trust:
             report.append(
-                f"[bold orange]Projects without trust acceptance ({len(no_trust)}):[/bold orange]"
+                f"[bold orange]Projetos sem aceitação de confiança ({len(no_trust)}):[/bold orange]"
             )
             for path in no_trust[:10]:
                 report.append(f"  • {path}")
             if len(no_trust) > 10:
-                report.append(f"  ... and {len(no_trust) - 10} more")
+                report.append(f"  ... e mais {len(no_trust) - 10}")
             report.append("")
 
         if not report:
-            report.append("[green]No issues found! All projects look healthy.[/green]")
+            report.append("[green]Nenhum problema encontrado! Todos os projetos parecem saudáveis.[/green]")
 
         # Summary
         total_projects = len(projects)
@@ -581,10 +607,10 @@ class AnalyzeProjectsScreen(Screen[None]):
 
         summary = [
             "",
-            "[bold]Summary:[/bold]",
-            f"Total projects: {total_projects}",
-            f"Total history entries: {total_history}",
-            f"Estimated total size: {total_size:.1f} MB",
+            "[bold]Resumo:[/bold]",
+            f"Total de projetos: {total_projects}",
+            f"Total de entradas no histórico: {total_history}",
+            f"Tamanho total estimado: {total_size:.1f} MB",
         ]
 
         content = self.query_one("#analysis_content", Static)
@@ -599,10 +625,10 @@ class HistoryManagementScreen(Screen[None]):
     """Screen for managing project history with retention options."""
 
     BINDINGS = [
-        Binding("escape", "go_back", "Back"),
-        Binding("q", "go_back", "Back"),
-        Binding("c", "clear_all", "Clear All"),
-        Binding("k", "keep_recent", "Keep Recent"),
+        Binding("escape", "go_back", "Voltar"),
+        Binding("q", "go_back", "Voltar"),
+        Binding("c", "clear_all", "Limpar Tudo"),
+        Binding("k", "keep_recent", "Manter Recentes"),
     ]
 
     def __init__(
@@ -617,12 +643,12 @@ class HistoryManagementScreen(Screen[None]):
         """Create the history management UI."""
         yield Header()
         yield Container(
-            Static(f"[bold]History Management: {self.project_path}[/bold]", id="history_title"),
+            Static(f"[bold]Gerenciamento de Histórico: {self.project_path}[/bold]", id="history_title"),
             Static(id="history_stats"),
-            Static("[bold]Recent History:[/bold]", id="recent_title"),
+            Static("[bold]Histórico Recente:[/bold]", id="recent_title"),
             Static(id="history_list"),
             Static(
-                "\n[dim]Press 'c' to clear all, 'k' to keep only recent entries[/dim]",
+                "\n[dim]Pressione 'c' para limpar tudo, 'k' para manter apenas entradas recentes[/dim]",
                 id="history_help",
             ),
             id="history_container",
@@ -634,8 +660,8 @@ class HistoryManagementScreen(Screen[None]):
         # Show statistics
         stats = self.query_one("#history_stats", Static)
         stats.update(
-            f"Total entries: {self.project.history_count}\n"
-            f"Estimated size: {self.project.get_size_estimate() / 1024:.1f} KB"
+            f"Total de entradas: {self.project.history_count}\n"
+            f"Tamanho estimado: {self.project.get_size_estimate() / 1024:.1f} KB"
         )
 
         # Show recent history
@@ -651,7 +677,7 @@ class HistoryManagementScreen(Screen[None]):
                 history_text += f"{i}. {display}\n"
             history_list.update(history_text)
         else:
-            history_list.update("[dim]No history entries[/dim]")
+            history_list.update("[dim]Sem entradas de histórico[/dim]")
 
     def action_go_back(self) -> None:
         """Go back to project list."""
@@ -661,7 +687,7 @@ class HistoryManagementScreen(Screen[None]):
         """Clear all history."""
         self.app.push_screen(
             ConfirmScreen(
-                f"Clear ALL {self.project.history_count} history entries?\n\nThis cannot be undone!",
+                f"Limpar TODAS as {self.project.history_count} entradas do histórico?\n\nIsso não pode ser desfeito!",
                 self._do_clear_all,
             )
         )
@@ -673,10 +699,10 @@ class HistoryManagementScreen(Screen[None]):
         self.config_manager.update_project(self.project)
 
         if self.config_manager.save_config(create_backup=False):
-            self.notify("All history cleared", severity="information")
+            self.notify("Todo o histórico foi limpo", severity="information")
             self.app.pop_screen()
         else:
-            self.notify("Failed to save changes", severity="error")
+            self.notify("Falha ao salvar alterações", severity="error")
 
     def action_keep_recent(self) -> None:
         """Show dialog to keep only recent entries."""
@@ -685,7 +711,7 @@ class HistoryManagementScreen(Screen[None]):
     def _do_keep_recent(self, keep_count: int) -> None:
         """Keep only the specified number of recent entries."""
         if keep_count >= self.project.history_count:
-            self.notify("No entries to remove", severity="warning")
+            self.notify("Sem entradas para remover", severity="warning")
             return
 
         self.config_manager.create_backup()
@@ -697,7 +723,7 @@ class HistoryManagementScreen(Screen[None]):
             self.notify(f"Kept {keep_count} most recent entries", severity="information")
             self.app.pop_screen()
         else:
-            self.notify("Failed to save changes", severity="error")
+            self.notify("Falha ao salvar alterações", severity="error")
 
 
 class KeepRecentDialog(Screen[None]):
@@ -710,11 +736,11 @@ class KeepRecentDialog(Screen[None]):
     def compose(self) -> ComposeResult:
         """Create the dialog."""
         yield Container(
-            Static("Keep how many recent entries?", id="keep_message"),
-            Input(placeholder="Enter number (e.g., 10, 50, 100)", id="keep_input"),
+            Static("Manter quantas entradas recentes?", id="keep_message"),
+            Input(placeholder="Digite um número (ex: 10, 50, 100)", id="keep_input"),
             Horizontal(
                 Button("OK", variant="primary", id="ok"),
-                Button("Cancel", variant="default", id="cancel"),
+                Button("Cancelar", variant="default", id="cancel"),
                 id="keep_buttons",
             ),
             id="keep_container",
@@ -734,9 +760,9 @@ class KeepRecentDialog(Screen[None]):
                     self.callback(count)
                     self.app.pop_screen()
                 else:
-                    self.notify("Please enter a positive number", severity="error")
+                    self.notify("Por favor, insira um número positivo", severity="error")
             except ValueError:
-                self.notify("Please enter a valid number", severity="error")
+                self.notify("Por favor, insira um número válido", severity="error")
         else:
             self.app.pop_screen()
 
@@ -752,11 +778,11 @@ class BackupManagementScreen(Screen[None]):
     """Screen for managing configuration backups."""
 
     BINDINGS = [
-        Binding("escape", "go_back", "Back"),
-        Binding("q", "go_back", "Back"),
-        Binding("c", "create_backup", "Create Backup"),
-        Binding("r", "restore_backup", "Restore Backup"),
-        Binding("d", "delete_backup", "Delete Backup"),
+        Binding("escape", "go_back", "Voltar"),
+        Binding("q", "go_back", "Voltar"),
+        Binding("c", "create_backup", "Criar Backup"),
+        Binding("r", "restore_backup", "Restaurar Backup"),
+        Binding("d", "delete_backup", "Excluir Backup"),
     ]
 
     def __init__(self, config_manager: ClaudeConfigManager) -> None:
@@ -768,7 +794,7 @@ class BackupManagementScreen(Screen[None]):
         """Create the backup management UI."""
         yield Header()
         yield Container(
-            Static("[bold]Backup Management[/bold]", id="backup_title"),
+            Static("[bold]Gerenciamento de Backups[/bold]", id="backup_title"),
             DataTable(id="backup_table"),
             id="backup_container",
         )
@@ -777,7 +803,7 @@ class BackupManagementScreen(Screen[None]):
     def on_mount(self) -> None:
         """Set up the backup table."""
         table = self.query_one("#backup_table", DataTable)
-        table.add_columns("Backup File", "Date/Time", "Size")
+        table.add_columns("Arquivo de Backup", "Data/Hora", "Tamanho")
         table.zebra_stripes = True
         table.cursor_type = "row"
         self.refresh_backups()
@@ -819,7 +845,7 @@ class BackupManagementScreen(Screen[None]):
             self.notify(f"Created backup: {backup_path.name}", severity="information")
             self.refresh_backups()
         else:
-            self.notify("Failed to create backup", severity="error")
+            self.notify("Falha ao criar backup", severity="error")
 
     def action_restore_backup(self) -> None:
         """Restore from selected backup."""
@@ -842,7 +868,7 @@ class BackupManagementScreen(Screen[None]):
             # Refresh the main project list
             self.app.pop_screen()
         else:
-            self.notify("Failed to restore backup", severity="error")
+            self.notify("Falha ao restaurar backup", severity="error")
 
     def action_delete_backup(self) -> None:
         """Delete selected backup."""
@@ -866,6 +892,181 @@ class BackupManagementScreen(Screen[None]):
             self.refresh_backups()
         except Exception as e:
             self.notify(f"Failed to delete: {e}", severity="error")
+
+
+class AgentListScreen(Screen[None]):
+    """Screen for listing available agents."""
+    
+    BINDINGS = [
+        Binding("escape", "go_back", "Voltar"),
+        Binding("q", "go_back", "Voltar"),
+        Binding("enter", "view_details", "Ver Detalhes", show=False),
+        Binding("r", "refresh", "Atualizar"),
+    ]
+    
+    def __init__(self, config_manager: ClaudeConfigManager) -> None:
+        super().__init__()
+        self.config_manager = config_manager
+        self.agents: dict[str, Agent] = {}
+    
+    def compose(self) -> ComposeResult:
+        """Create the agents list UI."""
+        yield Header()
+        yield Container(
+            Static("[bold]Agentes Disponíveis[/bold]", id="agents_title"),
+            DataTable(id="agents_table"),
+            id="agents_container",
+        )
+        yield Footer()
+    
+    def on_mount(self) -> None:
+        """Set up the agents table."""
+        table = self.query_one("#agents_table", DataTable)
+        table.add_columns("Nome", "Tipo", "Ferramentas", "Prioridade", "Descrição")
+        table.zebra_stripes = True
+        table.cursor_type = "row"
+        self.refresh_agents()
+    
+    @on(DataTable.RowSelected)
+    def on_row_selected(self, event: DataTable.RowSelected) -> None:
+        """Handle row selection with Enter."""
+        self.action_view_details()
+    
+    def refresh_agents(self) -> None:
+        """Refresh the agents list."""
+        # Get all agents (global)
+        self.agents = self.config_manager.get_agents()
+        
+        table = self.query_one("#agents_table", DataTable)
+        table.clear()
+        
+        for name, agent in sorted(self.agents.items()):
+            # Shorten description
+            description = agent.description
+            if len(description) > 60:
+                description = description[:57] + "..."
+            
+            # Type indicator
+            type_indicator = "🌍 Global" if agent.agent_type == "global" else "📁 Projeto"
+            
+            # Priority indicator
+            priority_display = ""
+            if agent.priority:
+                if agent.priority == "high":
+                    priority_display = "🔴 Alta"
+                elif agent.priority == "medium":
+                    priority_display = "🟡 Média"
+                elif agent.priority == "low":
+                    priority_display = "🟢 Baixa"
+            
+            table.add_row(
+                name,
+                type_indicator,
+                agent.tools_display,
+                priority_display,
+                description,
+                key=name,
+            )
+    
+    def action_go_back(self) -> None:
+        """Go back to project list."""
+        self.app.pop_screen()
+    
+    def action_refresh(self) -> None:
+        """Refresh the agents list."""
+        self.refresh_agents()
+    
+    def action_view_details(self) -> None:
+        """View details of selected agent."""
+        table = self.query_one("#agents_table", DataTable)
+        if table.cursor_row is not None:
+            rows = list(table.rows)
+            if 0 <= table.cursor_row < len(rows):
+                agent_name = str(rows[table.cursor_row].value)
+                if agent_name in self.agents:
+                    self.app.push_screen(
+                        AgentDetailScreen(self.agents[agent_name])
+                    )
+
+
+class AgentDetailScreen(Screen[None]):
+    """Screen showing agent details."""
+    
+    BINDINGS = [
+        Binding("escape", "go_back", "Voltar"),
+        Binding("q", "go_back", "Voltar"),
+    ]
+    
+    def __init__(self, agent: Agent) -> None:
+        super().__init__()
+        self.agent = agent
+    
+    def compose(self) -> ComposeResult:
+        """Create the agent detail view."""
+        yield Header()
+        yield VerticalScroll(
+            Static(f"[bold]Agente: {self.agent.name}[/bold]", id="agent_title"),
+            Static(id="agent_info"),
+            Static("[bold]Ferramentas:[/bold]", id="tools_title"),
+            Static(id="tools_list"),
+            Static("[bold]Descrição:[/bold]", id="description_title"),
+            Static(id="description_text"),
+            id="agent_detail_container",
+        )
+        yield Footer()
+    
+    def on_mount(self) -> None:
+        """Populate the agent details."""
+        # Basic info
+        info = self.query_one("#agent_info", Static)
+        info_text = []
+        info_text.append(f"Tipo: {'Global' if self.agent.agent_type == 'global' else 'Projeto'}")
+        if self.agent.color:
+            info_text.append(f"Cor: {self.agent.color}")
+        if self.agent.priority:
+            info_text.append(f"Prioridade: {self.agent.priority}")
+        if self.agent.file_path:
+            info_text.append(f"Arquivo: {self.agent.file_path}")
+        
+        # Advanced features
+        if self.agent.is_advanced:
+            info_text.append("")
+            info_text.append("[bold]Recursos Avançados:[/bold]")
+            if self.agent.neural_patterns:
+                info_text.append(f"Padrões Neurais: {', '.join(self.agent.neural_patterns)}")
+            if self.agent.learning_enabled:
+                info_text.append("Aprendizado: ✓ Habilitado")
+            if self.agent.collective_memory:
+                info_text.append("Memória Coletiva: ✓ Habilitada")
+            if self.agent.hive_mind_role:
+                info_text.append(f"Papel Hive Mind: {self.agent.hive_mind_role}")
+            if self.agent.concurrent_execution:
+                info_text.append("Execução Concorrente: ✓ Habilitada")
+            if self.agent.sparc_integration:
+                info_text.append("Integração SPARC: ✓ Habilitada")
+        
+        info.update("\n".join(info_text))
+        
+        # Tools list
+        tools = self.query_one("#tools_list", Static)
+        if self.agent.tools:
+            tools_text = "\n".join(f"• {tool}" for tool in self.agent.tools)
+        else:
+            tools_text = "[dim]Nenhuma ferramenta especificada[/dim]"
+        tools.update(tools_text)
+        
+        # Description
+        description = self.query_one("#description_text", Static)
+        if self.agent.description:
+            # Escape description to prevent markup errors
+            desc_text = escape(self.agent.description)
+        else:
+            desc_text = "[dim]Sem descrição disponível[/dim]"
+        description.update(desc_text)
+    
+    def action_go_back(self) -> None:
+        """Go back to agents list."""
+        self.app.pop_screen()
 
 
 class ClaudeManagerApp(App[None]):
@@ -1030,6 +1231,43 @@ class ClaudeManagerApp(App[None]):
     #keep_buttons {
         align: center middle;
         margin-top: 1;
+    }
+    
+    #agents_container {
+        height: 100%;
+        padding: 1 2;
+    }
+    
+    #agents_title {
+        margin-bottom: 1;
+        text-align: center;
+    }
+    
+    #agents_table {
+        height: 1fr;
+    }
+    
+    #agent_detail_container {
+        padding: 1 2;
+    }
+    
+    #agent_title {
+        margin-bottom: 1;
+    }
+    
+    #tools_title {
+        margin-top: 2;
+        margin-bottom: 1;
+    }
+    
+    #description_title {
+        margin-top: 2;
+        margin-bottom: 1;
+    }
+    
+    #agents_title_detail {
+        margin-top: 2;
+        margin-bottom: 1;
     }
     """
 

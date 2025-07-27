@@ -5,11 +5,12 @@ from __future__ import annotations
 import json
 import logging
 import shutil
+import yaml
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from claude_manager.models import Project
+from claude_manager.models import Agent, Project
 
 logger = logging.getLogger(__name__)
 
@@ -240,3 +241,93 @@ class ClaudeConfigManager:
             List of backup file paths sorted by modification time (most recent first)
         """
         return sorted(self.backup_dir.glob("claude_*.json"), reverse=True)
+
+    def get_agents(self, project_path: str | None = None) -> dict[str, Agent]:
+        """Get available agents, both global and project-specific.
+        
+        Args:
+            project_path: Optional project path to get project-specific agents
+            
+        Returns:
+            Dictionary mapping agent names to Agent objects
+        """
+        agents = {}
+        
+        # Global agents
+        global_agents_dir = Path.home() / ".claude" / "agents"
+        if global_agents_dir.exists():
+            for agent_file in global_agents_dir.glob("*.md"):
+                agent = self._parse_agent_file(agent_file, "global")
+                if agent:
+                    agents[agent.name] = agent
+        
+        # Project-specific agents
+        if project_path:
+            project_agents_dir = Path(project_path) / ".claude" / "agents"
+            if project_agents_dir.exists():
+                for agent_file in project_agents_dir.glob("*.md"):
+                    agent = self._parse_agent_file(agent_file, "project")
+                    if agent:
+                        # Project agents override global ones with same name
+                        agents[agent.name] = agent
+        
+        return agents
+    
+    def _parse_agent_file(self, file_path: Path, agent_type: str) -> Agent | None:
+        """Parse an agent markdown file and extract frontmatter.
+        
+        Args:
+            file_path: Path to the agent .md file
+            agent_type: "global" or "project"
+            
+        Returns:
+            Agent object if successful, None otherwise
+        """
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            
+            # Extract frontmatter
+            if content.startswith("---"):
+                # Find the closing ---
+                end_idx = content.find("---", 3)
+                if end_idx != -1:
+                    frontmatter_str = content[3:end_idx].strip()
+                    try:
+                        frontmatter = yaml.safe_load(frontmatter_str)
+                        if frontmatter and isinstance(frontmatter, dict):
+                            # Extract fields from frontmatter
+                            name = frontmatter.get("name", file_path.stem)
+                            description = frontmatter.get("description", "")
+                            tools_str = frontmatter.get("tools", "")
+                            
+                            # Parse tools list
+                            tools = []
+                            if tools_str:
+                                tools = [t.strip() for t in tools_str.split(",") if t.strip()]
+                            
+                            # Create Agent object
+                            agent = Agent(
+                                name=name,
+                                description=description,
+                                tools=tools,
+                                file_path=str(file_path),
+                                color=frontmatter.get("color"),
+                                priority=frontmatter.get("priority"),
+                                neural_patterns=frontmatter.get("neural_patterns", []),
+                                learning_enabled=frontmatter.get("learning_enabled", False),
+                                collective_memory=frontmatter.get("collective_memory", False),
+                                hive_mind_role=frontmatter.get("hive_mind_role"),
+                                concurrent_execution=frontmatter.get("concurrent_execution", False),
+                                sparc_integration=frontmatter.get("sparc_integration", False),
+                                agent_type=agent_type,
+                            )
+                            
+                            return agent
+                    except yaml.YAMLError as e:
+                        logger.warning(f"Error parsing YAML frontmatter in {file_path}: {e}")
+            
+        except Exception as e:
+            logger.error(f"Error reading agent file {file_path}: {e}")
+        
+        return None
