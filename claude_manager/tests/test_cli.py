@@ -34,7 +34,7 @@ class TestCLI:
         result = runner.invoke(main, ["--help"])
         assert result.exit_code == 0
         assert "Claude Manager" in result.output
-        assert "Manage your Claude Code projects" in result.output
+        assert "Gerencie seus projetos de código Claude" in result.output
         assert "--config" in result.output
         assert "--debug" in result.output
 
