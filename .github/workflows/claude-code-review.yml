@@ -12,11 +12,12 @@ on:
 
 jobs:
   claude-review:
-    # Optional: Filter by PR author
-    # if: |
-    #   github.event.pull_request.user.login == 'external-contributor' ||
-    #   github.event.pull_request.user.login == 'new-developer' ||
-    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
+    # Skip review for WIP, draft PRs or when [skip-review] is in title
+    if: |
+      !contains(github.event.pull_request.title, '[skip-review]') &&
+      !contains(github.event.pull_request.title, '[WIP]') &&
+      !contains(github.event.pull_request.title, 'WIP:') &&
+      github.event.pull_request.draft != true
     
     runs-on: ubuntu-latest
     permissions:
@@ -38,21 +39,31 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
           # Optional: Specify model (defaults to Claude Sonnet 4, uncomment for Claude Opus 4)
-          # model: "claude-opus-4-20250514"
+          model: "claude-opus-4-20250514"
           
           # Direct prompt for automated review (no @claude mention needed)
           direct_prompt: |
-            Please review this pull request and provide feedback on:
-            - Code quality and best practices
-            - Potential bugs or issues
-            - Performance considerations
-            - Security concerns
-            - Test coverage
+            Por favor, revise este pull request e forneça feedback sobre:
+            - Qualidade do código e boas práticas
+            - Possíveis bugs ou problemas
+            - Considerações de performance
+            - Questões de segurança
+            - Cobertura de testes
             
-            Be constructive and helpful in your feedback.
+            Para arquivos TypeScript/JavaScript:
+            - Verifique tipagem e interfaces
+            - Analise gerenciamento de estado
+            - Revise práticas de React/hooks se aplicável
+            
+            Para arquivos de API:
+            - Validação de entrada
+            - Tratamento de erros
+            - Autenticação e autorização
+            
+            Seja construtivo e útil em seu feedback. Responda em português.
 
           # Optional: Use sticky comments to make Claude reuse the same comment on subsequent pushes to the same PR
-          # use_sticky_comment: true
+          use_sticky_comment: true
           
           # Optional: Customize review based on file types
           # direct_prompt: |
@@ -69,7 +80,7 @@ jobs:
           #   'Please provide a thorough code review focusing on our coding standards and best practices.' }}
           
           # Optional: Add specific tools for running tests or linting
-          # allowed_tools: "Bash(npm run test),Bash(npm run lint),Bash(npm run typecheck)"
+          allowed_tools: "Bash(npm run test),Bash(npm run lint),Bash(npm run typecheck),Bash(npm run build)"
           
           # Optional: Skip review for certain conditions
           # if: |
