@@ -24,6 +24,8 @@ from textual.widgets import (
     TextArea,
 )
 
+from claude_manager.mcp_validation import MCPValidator
+
 if TYPE_CHECKING:
     from claude_manager.config import ClaudeConfigManager
     from claude_manager.models import Agent, Project
@@ -311,6 +313,7 @@ class MCPServerScreen(Screen[None]):
     BINDINGS = [
         Binding("escape", "go_back", "Voltar"),
         Binding("a", "add_server", "Adicionar Servidor"),
+        Binding("p", "add_from_template", "Adicionar de Template"),
         Binding("d", "delete_server", "Excluir Servidor"),
         Binding("e", "edit_server", "Editar Servidor"),
         Binding("t", "toggle_all", "Alternar Todos"),
@@ -384,6 +387,10 @@ class MCPServerScreen(Screen[None]):
     def action_add_server(self) -> None:
         """Add a new MCP server."""
         self.app.push_screen(MCPServerEditScreen(self, None, None))
+    
+    def action_add_from_template(self) -> None:
+        """Add a new MCP server from template."""
+        self.app.push_screen(MCPTemplateSelectScreen(self))
 
     def action_edit_server(self) -> None:
         """Edit selected MCP server."""
@@ -504,6 +511,17 @@ class MCPServerEditScreen(Screen[None]):
         try:
             # Parse the JSON to validate it
             server_config = json.loads(config_area.text)
+            
+            # Validate MCP configuration
+            is_valid, error_msg = MCPValidator.validate_config(server_config, server_name)
+            if not is_valid:
+                self.notify(f"Configuração inválida: {error_msg}", severity="error")
+                return
+            
+            # Show warning if there is one
+            if error_msg:  # This contains warnings even when valid
+                self.notify(error_msg, severity="warning")
+            
             # Store it as a compact single-line JSON in the config
             self.parent_screen.save_server(self.original_name, server_name, server_config)
             self.app.pop_screen()
@@ -513,6 +531,76 @@ class MCPServerEditScreen(Screen[None]):
 
     def action_cancel(self) -> None:
         """Cancel editing."""
+        self.app.pop_screen()
+
+
+class MCPTemplateSelectScreen(Screen[None]):
+    """Screen for selecting MCP server template."""
+    
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancelar"),
+        Binding("enter", "select", "Selecionar"),
+    ]
+    
+    def __init__(self, parent_screen: MCPServerScreen) -> None:
+        super().__init__()
+        self.parent_screen = parent_screen
+        self.templates = MCPValidator.list_templates()
+        
+    def compose(self) -> ComposeResult:
+        """Create the template selection UI."""
+        yield Header()
+        yield Container(
+            Static("[bold]Selecionar Template de Servidor MCP[/bold]", id="template_title"),
+            DataTable(id="template_table"),
+            Static("[dim]Use ↑↓ para navegar, Enter para selecionar, Escape para cancelar[/dim]", id="template_help"),
+            id="template_container",
+        )
+        yield Footer()
+    
+    def on_mount(self) -> None:
+        """Set up the templates table."""
+        table = self.query_one("#template_table", DataTable)
+        table.add_columns("Template", "Descrição")
+        table.zebra_stripes = True
+        table.cursor_type = "row"
+        
+        # Template descriptions
+        descriptions = {
+            "filesystem": "Servidor de sistema de arquivos - acesso controlado a diretórios",
+            "github": "Integração com GitHub - requer token de acesso",
+            "postgres": "Conexão com PostgreSQL - requer URL de conexão",
+            "claude-flow": "Claude Flow - coordenação avançada e swarm",
+            "memory": "Servidor de memória - armazenamento temporário",
+            "custom": "Template customizado - configure manualmente"
+        }
+        
+        # Add rows
+        for template in self.templates:
+            desc = descriptions.get(template, "Sem descrição")
+            table.add_row(template, desc)
+            
+        # Focus first row
+        if table.row_count > 0:
+            table.focus()
+            table.cursor_row = 0
+    
+    def action_select(self) -> None:
+        """Select the current template."""
+        table = self.query_one("#template_table", DataTable)
+        if table.cursor_row is not None:
+            rows = list(table.rows)
+            if 0 <= table.cursor_row < len(rows):
+                template_name = str(rows[table.cursor_row].value).split('\t')[0]
+                template_config = MCPValidator.get_template(template_name)
+                if template_config:
+                    self.app.pop_screen()
+                    self.app.push_screen(
+                        MCPServerEditScreen(self.parent_screen, None, template_config)
+                    )
+    
+    def action_cancel(self) -> None:
+        """Cancel template selection."""
         self.app.pop_screen()
 
 
@@ -1137,6 +1225,25 @@ class ClaudeManagerApp(App[None]):
 
     #mcp_table {
         height: 1fr;
+    }
+    
+    #template_container {
+        height: 100%;
+        padding: 1 2;
+    }
+    
+    #template_title {
+        margin-bottom: 1;
+    }
+    
+    #template_table {
+        height: 1fr;
+        margin-bottom: 1;
+    }
+    
+    #template_help {
+        margin-top: 1;
+        color: $text-muted;
     }
 
     #edit_container {
