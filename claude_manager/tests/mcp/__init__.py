@@ -1,0 +1,1 @@
+"""MCP Test Suite for Claude Manager."""
